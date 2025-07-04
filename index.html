@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>インタラクティブ企業ディレクトリ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals (Stone, White, Indigo) -->
+    <!-- Application Structure Plan: このアプリケーションは、上部にコントロールパネル（検索、都道府県フィルタ、架電状況フィルタ、架電結果フィルタ）、中央に視覚的なサマリー（所在地別企業数チャート、架電結果円グラフ）、下部に詳細な企業情報カードリストを配置したダッシュボード形式を採用しています。この構造は、ユーザーがまず全体の概要を把握し、次に興味のある部分をドリルダウンして探索するという自然な情報消費フローをサポートするために選択されました。検索とフィルタリング機能を備えることで、ユーザーは膨大なリストから目的の情報を効率的に見つけ出すことができます。今回は、各企業カードを画像のデザインに合わせ、個別の編集ボタンでモーダル編集をトリガーするように変更しました。 -->
+    <!-- Visualization & Content Choices: 所在地別企業数（レポート情報）→比較（ゴール）→横棒グラフ（Viz/Presentation）→フィルタに連動して更新（インタラクション）→Chart.js（ライブラリ）。この選択は、多数の都道府県にわたる企業分布を視覚的に比較するのに最も効果的であるためです。企業リスト（レポート情報）→整理・探索、編集、連絡状況追跡（ゴール）→インタラクティブなカードグリッド（Viz/Presentation）→検索とフィルタで動的に更新、個別の編集ボタンでモーダルを開き詳細編集、架電済チェックボックスで状態管理、架電状況/架電結果ドロップダウンで表示絞り込み（インタラクション）→HTML/CSS/JS（メソッド）。カード形式は、各企業の情報を整理して表示し、特にモバイルデバイスでの可読性が高いため採用しました。架電状況件数・架電結果件数（レポート情報）→概要把握（ゴール）→テキスト表示（Viz/Presentation）→データ変更・フィルター適用時に自動更新（インタラクション）→HTML/CSS/JS（メソッド）。件数表示は、ユーザーが現在の進捗を素早く確認できるようにするために直接的なテキストが最適です。架電結果割合（レポート情報）→構成比（ゴール）→円グラフ（Viz/Presentation）→データ変更・フィルター適用時に自動更新（インタラクション）→Chart.js（ライブラリ）。円グラフは、全体の構成比を直感的に把握するのに適しています。 -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body { font-family: 'Inter', 'Noto Sans JP', sans-serif; background-color: #f8fafc; }
+        .chart-container { position: relative; width: 100%; max-width: 900px; margin-left: auto; margin-right: auto; height: 350px; max-height: 50vh; }
+        @media (min-width: 768px) { .chart-container { height: 450px; } }
+        .card { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+        .fade-in { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .called-card {
+            background-color: #ecfdf5; /* Tailwind green-50 */
+            border-color: #34d399; /* Tailwind green-400 */
+        }
+        /* Modal styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 0.3s ease;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            transform: scale(0.95);
+            transition: transform 0.3s ease;
+        }
+        .modal-overlay:not(.hidden) .modal-content {
+            transform: scale(1);
+        }
+        .memo-display {
+            white-space: pre-wrap; /* Preserve whitespace and wrap lines */
+            word-break: break-word; /* Break long words */
+            background-color: #f9fafb;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-indigo-700">企業情報ダッシュボード</h1>
+            <p class="text-gray-600 mt-2">提供された企業リストのインタラクティブな分析と閲覧</p>
+        </header>
+
+        <main>
+            <div id="controls" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                    <div>
+                        <label for="search-input" class="block text-sm font-medium text-gray-700 mb-2">企業名で検索</label>
+                        <input type="text" id="search-input" placeholder="例: 株式会社 アイデム" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                    </div>
+                    <div>
+                        <label for="prefecture-filter" class="block text-sm font-medium text-gray-700 mb-2">都道府県で絞り込み</label>
+                        <select id="prefecture-filter" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition bg-white">
+                            <option value="">すべての都道府県</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-6 pt-6 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
+                    <div>
+                        <label for="call-status-filter" class="block text-sm font-medium text-gray-700 mb-2">架電状況で絞り込み</label>
+                        <select id="call-status-filter" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition bg-white">
+                            <option value="all">すべて表示</option>
+                            <option value="called">架電済のみ表示</option>
+                            <option value="not-called">未架電のみ表示</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="call-result-filter" class="block text-sm font-medium text-gray-700 mb-2">架電結果で絞り込み</label>
+                        <select id="call-result-filter" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition bg-white">
+                            <option value="all">すべての結果</option>
+                            <option value="留守">留守</option>
+                            <option value="アプローチNG">アプローチNG</option>
+                            <option value="クロージングNG">クロージングNG</option>
+                            <option value="担当不在">担当不在</option>
+                            <option value="見込み">見込み</option>
+                            <option value="アポOK">アポOK</option>
+                            <option value="未入力">未入力</option>
+                        </select>
+                    </div>
+                    <div class="text-base font-medium text-gray-700 md:col-span-1 lg:col-span-1 mt-4 md:mt-0">
+                        <p><span id="total-companies-count">全企業: 0件</span></p>
+                        <p><span id="called-count">架電済: 0件</span></p>
+                        <p><span id="not-called-count">未架電: 0件</span></p>
+                        <div class="mt-2 text-sm">
+                            <p>結果別:</p>
+                            <ul id="call-result-summary" class="list-disc list-inside ml-2">
+                                <!-- Call results will be dynamically inserted here -->
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <section id="analytics" class="mb-8 p-6 bg-white rounded-xl shadow-md">
+                <h2 class="text-xl font-bold text-center mb-4">分析チャート</h2>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div>
+                        <h3 class="text-lg font-bold text-center mb-4">所在地別企業数</h3>
+                        <p class="text-gray-600 text-center mb-6">各都道府県に所在する企業の数を示します。</p>
+                        <div class="chart-container">
+                            <canvas id="prefecture-chart"></canvas>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-center mb-4">架電結果の割合</h3>
+                        <p class="text-gray-600 text-center mb-6">現在のフィルターで表示されている企業の架電結果の割合を示します。</p>
+                        <div class="chart-container">
+                            <canvas id="call-result-pie-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="company-directory">
+                 <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold">企業リスト</h2>
+                    <p id="result-count" class="text-gray-600 font-medium"></p>
+                </div>
+                <div id="company-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h3 class="text-2xl font-bold mb-6 text-gray-800">企業情報の編集</h3>
+            <p id="edit-modal-info" class="text-sm text-gray-600 mb-4"></p>
+            <form id="edit-form" class="space-y-4">
+                <input type="hidden" id="editing-company-id">
+                <div>
+                    <label for="edit-企業名" class="block text-sm font-medium text-gray-700">企業名</label>
+                    <input type="text" id="edit-企業名" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="edit-電話番号" class="block text-sm font-medium text-gray-700">電話番号</label>
+                    <input type="text" id="edit-電話番号" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="edit-住所" class="block text-sm font-medium text-gray-700">住所</label>
+                    <input type="text" id="edit-住所" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="edit-HPアドレス" class="block text-sm font-medium text-gray-700">HPアドレス</label>
+                    <input type="text" id="edit-HPアドレス" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="edit-架電結果" class="block text-sm font-medium text-gray-700">架電結果</label>
+                    <select id="edit-架電結果" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                        <option value="未入力">未入力</option>
+                        <option value="留守">留守</option>
+                        <option value="アプローチNG">アプローチNG</option>
+                        <option value="クロージングNG">クロージングNG</option>
+                        <option value="担当不在">担当不在</option>
+                        <option value="見込み">見込み</option>
+                        <option value="アポOK">アポOK</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="edit-最終接触日" class="block text-sm font-medium text-gray-700">最終接触日</label>
+                    <input type="date" id="edit-最終接触日" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="edit-メモ" class="block text-sm font-medium text-gray-700">メモ</label>
+                    <textarea id="edit-メモ" rows="4" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button type="button" id="cancel-edit" class="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">キャンセル</button>
+                    <button type="submit" id="save-edit" class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="delete-confirm-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content text-center">
+            <h3 class="text-xl font-bold mb-4 text-gray-900">削除の確認</h3>
+            <p id="delete-confirm-text" class="text-gray-600 mb-8">この企業情報を本当に削除しますか？<br>この操作は元に戻せません。</p>
+            <div class="flex justify-center space-x-4">
+                <button id="cancel-delete" class="px-6 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">キャンセル</button>
+                <button id="confirm-delete" class="px-6 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700">はい、削除します</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        const companyData = `企業名,電話番号,住所,HPアドレス
+株式会社 アークス,072-268-2125,大阪府堺市北区奥本町1丁290番地,http://www.arcuss.jp
+株式会社 アイ・キュー,03-3560-1919,東京都港区赤坂4-1-30 AKABISHI-Ⅱビル,http://www.jinzai-bank.net
+株式会社 アイデム,0120-935-774,大阪府大阪市西区西本町1-13-43 アイデム西本町ビル ８F,http://smartagent.jp/
+アイビーシー 株式会社,03-5423-2930,東京都港区白金台1-5-12,http://www.p-ibc.co.jp
+アイビーメディカル 株式会社,078-575-1105,兵庫県神戸市長田区御蔵通5-205-3,http://www.ivy-medical.com/
+アイマッチング 株式会社,0120-971-746,東京都港区赤坂8-10-39 赤坂KSAビル ３階,http://taxi-carrier.com/
+株式会社 アクセライズ,06-6341-0014,大阪府大阪市北区堂島二丁目1番27号 桜橋千代田ビル8階,http://a-career.info/
+株式会社 アシストパワー,06-6900-8777,大阪府門真市泉町8-14,http://www.assist-power.co.jp
+株式会社 アスカ,06-6131-5091,大阪府大阪市北区堂島1-6-20 堂島アバンザ6階,http://www.asuka-hu.co.jp/
+株式会社 アソウ・ヒューマニーセンター,06-6348-5900,大阪府大阪市北区堂島1-6-20 堂島アバンザビル4階,http://www.ahc-net.co.jp/
+アソート 株式会社,06-6341-5782,大阪府大阪市北区梅田1-2-2 大阪駅前第2ビル4階,http://www.assort.co.jp/
+アデコ 株式会社,0120-510-699,大阪府大阪市北区芝田1-1-4 阪急ターミナルビル9F,http://www.adecco.co.jp/
+株式会社 アテンダントナース,075-254-7872,京都府京都市中京区烏丸通蛸薬師下ル手洗水町646-2,http://www.attendant-nurse.co.jp
+アドバンテック 株式会社,06-4807-5700,大阪府大阪市淀川区宮原3-5-36,http://advan-t.com
+アポプラスステーション 株式会社,0120-332-290,大阪府大阪市中央区今橋4-4-7 京阪神淀屋橋ビル９階,http://www.medical-job.jp/
+株式会社 イマジンプラス,0120-789-651,大阪府大阪市北区梅田2-5-10 学情梅田コンパス7F,http://imagineplus.co.jp/
+株式会社 インターテクノ,06-7636-1000,大阪府大阪市北区小松原町3-3 OSビル13F,http://www.inter-techno.jp
+with Career 株式会社,0120-918-281,東京都千代田区東神田2-9-8 高橋ビル 4階,https://j-depo.com/
+株式会社 ウィルテック,06-6908-9988,大阪府大阪市淀川区東三国4-3-1 グロリア240 4Ｆ,http://www.willtec.jp/
+株式会社 WILLWORK,06-6232-0382,大阪府大阪市中央区平野町3-1-2 キューアス平野町ビル ３階,https://osaka-kaigo-tensyoku.com/
+株式会社 ウェルクス,03-6844-3960,東京都墨田区両国4-8-10 MYSビル201,http://www.hoiku-shigoto.com/
+株式会社 エス・エム・エス,03-6721-2448,東京都港区芝公園2-11-1 住友不動産芝公園タワー,http://www.bm-sms.co.jp/
+SBSスタッフ 株式会社,03-3829-2975,東京都墨田区太平4-1-3 オリナスタワー10F,http://www.sbs-staff.co.jp
+株式会社 エスプールヒューマンソリューションズ,06-7688-5855,大阪府大阪市北区梅田1-1-3大阪駅前第3ビル14階,https://www.spool.co.jp/service/shs/
+株式会社 MS-Japan,06-6292-5838,大阪府大阪市北区大深町3-1 グランフロント大阪タワーＢ 24Ｆ,http://www.jmsc.co.jp/
+エムスリーキャリア 株式会社,0120-981-590,東京都港区芝公園2-11-1 住友不動産芝公園タワー21階,http://agent.m3career.com/
+株式会社 Ｏ．Ｍ．Ｋ．,0742-26-5262,奈良県奈良市林小路町15 タニビル２階Ｂ東室,http://www.e-darwin.net/
+社会福祉法人 大阪府社会福祉協議会,06-6762-9020,大阪府大阪市中央区中寺1-1-54 大阪社会福祉指導センター1階,http://www.osakafusyakyo.or.jp/fcenter/
+株式会社 オフィス総務,06-6781-0114,大阪府東大阪市西堤本通東1-1-1 東大阪大発ビル806,http://www.officesoumu.co.jp/
+株式会社 カネカ・クリエイティブ・コンサルティング,06-6345-8345,大阪府大阪市北区堂島2-2-2 近鉄堂島ビル19階,http://www.kcc-web.net/
+株式会社 関西メディカルファーマシー,06-6753-8011,大阪府大阪市東成区中本5-27-28,https://nurse-happiness.net/
+株式会社 キャリアシステム,0120-505-169,大阪府大阪市北区小松原町2-4 大阪富国生命ビル16階,http://www.career-system.net
+株式会社 キャリアパワー,06-6346-2929,京都府京都市下京区塩小路通烏丸西入東塩小路町843-2,http://www.careerpower.co.jp/
+株式会社 キャリアブレイン,0120-488-962,大阪府大阪市北区豊崎3-19-3 ピアスタワー13F,http://www.cabrain.net
+株式会社 キャリア・ポジション,06-6373-6383,大阪府大阪市北区芝田2-1-18 西阪急ビル7F,http://www.career-position.com/
+キャリアリンク 株式会社,0120-995-801,大阪府大阪市北区堂島1-6-20 堂島アバンザ6階,http://www.careerlink.co.jp/
+キャリアロード 株式会社,0120-377-720,千葉県船橋市西船4-12-10 早稲田13時ビル６Ｆ,http://www.careerroad.co.jp
+株式会社 クイック,0120-512-919,大阪府大阪市北区小松原町2-4 大阪富国生命ビル16F,http://kango.919.co.jp/
+株式会社 クラス,06-6210-1855,大阪府大阪市中央区備後町2-4-6森田ビル7Ｆ,https://kras.co.jp
+株式会社 クリエアナブキ,06-6367-5654,大阪府大阪市北区西天満4-14-3 リゾートトラスト御堂筋ビル10Ｆ,http://www.crie.co.jp
+株式会社 クリエイトプランニング,06-6868-3728,大阪府豊中市寺内2-13-1 緑地ステーションビル603,http://lavoro-med.com/
+株式会社 グレイス,0120-70-1961,大阪府大阪市中央区北浜2-5-13 北浜平和ビル,http://www.grace-e.co.jp/
+株式会社 グロップ,06-6292-6273,大阪府大阪市北区芝田2-7-18 オーエックス梅田ビル新館2階,http://www.grop.co.jp
+ケイ．イー．シー． 株式会社,06-6347-7337,大阪府大阪市北区曽根崎新地2-6-12 小学館ビル,http://www.jinzai.kec.ne.jp/
+株式会社 コーディアリティケア,06-6454-5100,大阪府大阪市北区梅田1-12-17 梅田スクエアビル5F,http://www.cordialitycare.co.jp/
+株式会社 コマエンタープライズ,06-6342-7355,大阪府大阪市北区梅田1-8-17 大阪第一生命ビルディング4階,http://www.koma-ent.com/
+サンワ 株式会社,06-6208-1970,大阪府大阪市中央区伏見町4-2-14 WAKITA藤村御堂筋ビル７階,http://www.sanwa3801.com/
+合同会社 CS企画,072-743-2446,兵庫県伊丹市昆陽南3-1-34,http://www.cskikaku.com/
+Ｃ４ 株式会社,0120-244-104,神奈川県横浜市港北区新横浜2-2-15パレアナビル6Ｆ,https://sekokan-navi.jp/
+ジェイコム 株式会社,06-6364-6000,大阪府大阪市北区角田町8-1 梅田阪急ビルオフィスタワー19階,http://www.jcm.co.jp/
+株式会社 ジェイック,0120-992-849,大阪府大阪市北区高麗橋4-2-16 朝日生命館4F,http://www.naitei-get.com
+株式会社 ジェット,098-987-9070,沖縄県那覇市具志1-1-11 新建宅ビル高良301号室,http://www.jet.okinawa/
+ジャスネットコミュニケーションズ 株式会社,06-7711-7000,大阪府大阪市中央区南船場3-5-8,http://www.jusnet.co.jp/
+商船三井キャリアサポート 株式会社,06-6479-1888,大阪府大阪市北区中之島2-2-23 中之島ダイビル６階,http://www.molcs.co.jp
+株式会社 スポーツフィールド,06-6373-2508,大阪府大阪市北区芝田1-14-8 梅田北プレイス 5階,https://www.sponavi.com/career/
+株式会社 スリーサイズ,092-273-2138,福岡県福岡市博多区下川端町2-1 博多リバレインイーストサイト博多座・西銀ビル11F,http://www.three-sides.jp/
+株式会社 ゼネラルパートナーズ,06-6343-9901,大阪府大阪市北区梅田1-11-4 大阪駅前第4ビル23F,http://work.generalpartners.co.jp/
+株式会社 センチュリーアンドカンパニー,06-6636-3203,大阪府大阪市中央区難波3-6-11 なんば池田ビル9階,http://www.century-and.co.co.jp
+セントスタッフ 株式会社,0120-106-391,大阪府大阪市北区曽根崎新地1-3-16 京富ビル7F,http://www.st-staff.co.jp/
+戦力エージェント 株式会社,042-528-6651,東京都立川市錦町1-6-6 岩崎錦町ビル7F（立川事務センター）,http://www.senage.co.jp/
+株式会社 Social Bridge,06-6453-5720,大阪府大阪市北区梅田1－1－3 大阪駅前第3ビル14F10号,http://osaka-roudoukyoku.jsite.mhlw.go.jp/
+株式会社 太陽アネックス,075-213-2710,京都府京都市中京区烏丸通蛸薬師角七観音町 烏丸センタービル4階,http://www.33san.com/
+竹下産業 株式会社,06-6453-1041,大阪府大阪市北区梅田1-1-3-900,http://takeshita-sangyo.co.jp
+タスクターニング 株式会社,06-6360-0221,大阪府大阪市北区南森町1-1-25八千代ビル南館,http://www.thask-turning.co.jp
+WDB 株式会社,06-7664-9711,大阪府大阪市北区梅田3-3-20 明治安田生命大阪梅田ビル22階,http://www.wdb.com/office.nsf/office?Open&nm=osaka
+株式会社 ツクイスタッフ,06-6131-3786,大阪府大阪市北区角田町8-47 阪急グランドビル23階,http://www.tsukui-staff.net
+株式会社 TS工建,06-6232-3311,大阪府大阪市中央区淡路町3丁目6-3 NMプラザ御堂筋11F,http://iryouworker.com/
+ディーピーティー 株式会社,0120-192-390,愛知県名古屋市中区栄三丁目3番21号 セントライズ栄8Ｆ,http://www.dpt-inc.co.jp
+株式会社 テクノ経営総合研究所,06-6910-0075,大阪府大阪市中央区内平野町2-3-14 ライオンズビル大手前４階,http://human.tmng.co.jp/
+テクノワークス 株式会社,06-6121-7446,大阪府大阪市中央区久太郎町2-5-28 久太郎町恒和ビル５階,http://www.technoworks.ne.jp
+テルウェル西日本 株式会社,06-6944-8840,大阪府大阪市中央区森ノ宮中央1-7-12,http://www.staffmore.jp/
+テンプスタッフ 株式会社,0120-537-102,東京都渋谷区代々木2-1-1 新宿マインズタワー,http://www.tempstaff.co.jp/personal/
+テンプスタッフ・クロス 株式会社,0120-069-890,大阪府大阪市北区梅田2-5-25 ハービスOSAKAオフィスタワー7F,http://www.tempcross.co.jp/
+テンプスタッフ・テクノロジー 株式会社,06-6373-8010,大阪府大阪市淀川区西中島5-12-8 エス･ティ･エスビル7F,http://www.temptech.co.jp/
+テンブロス 株式会社,0120-102-604,大阪府大阪市北区中崎西2-4-12 梅田センタービル 10F,http://www.tempbros.co.jp/
+株式会社 東洋システムサイエンス,045-451-3191,神奈川県横浜市西区高島2-10-13 横浜東口ビル,http://www.dieti.biz/
+東洋ワーク 株式会社,059-355-5575,三重県四日市市浜田町6-11 サムティ四日市ビル,http://www.toyowork.co.jp
+株式会社 トーコー,06-6220-1050,大阪府大阪市北区中之島2-2-2 大阪中之島ビル13階,http://www.tkg.co.jp/
+トーテックフロンティア 株式会社,0120-20-8026,愛知県名古屋市西区名駅2-27-8 名古屋プライムセントラルタワー7階,http://www.totecfrontier.co.jp
+トライアロー 株式会社,06-6375-9061,大阪府大阪市北区豊崎3-20-9 三栄ビル4F,http://www.tri-arrow.co.jp
+株式会社 ナースパワー人材センター,06-6345-0100,大阪府大阪市北区堂島1丁目6番20号 堂島アバンザ6階,http://www.nursepower.co.jp/
+株式会社 ナイチンゲール,06-6454-2220,大阪府大阪市北区梅田1-12-17 梅田スクエアビル5F,http://www.nightingale-web.com/
+日研総業 株式会社,06-4802-3344,大阪府大阪市北区芝田1-4-8 北阪急ビル9Ｆ,http://www.nikken-sogyo.co.jp/
+日総工産 株式会社,06-6450-4761,大阪府大阪市北区梅田1－11－4 大阪駅前第四ビル21F,http://www.nisso.co.jp/
+株式会社 ニッソーネット,0120-518-739,大阪府大阪市北区芝田1-4-14 芝田町ビル８Ｆ,http://kaigobatake.jp/
+株式会社 日本教育クリエイト,0120-932-441,大阪府大阪市北区梅田1-2-2 大阪駅前第2ビル15F,http://www.ijiwork.com/
+株式会社 日本マンパワー,06-6446-1221,大阪府大阪市西区靱本町1-11-7 信濃橋三井ビル10階,http://www.nipponmanpower.co.jp/
+日本メディカル 株式会社,03-6427-2921,大阪府大阪市北区堂島2-2-26アバンダント堂島5F,http://japanmedical.jp/
+株式会社 ネクストビート,0120-071-639,東京都品川区西五反田1-18-9五反田ＮＴビル7階,http://www.hoikushibank.com/
+パスコ 株式会社,078-882-3270,兵庫県神戸市灘区岩屋中町１－２－９ ｴﾋﾞｽﾋﾞﾙ４階,http://www.pusco.jp
+株式会社 パソナ,0120-707-707,大阪府大阪市中央区淡路町4-2-15,http://www.pasonacareer.jp/
+株式会社 パソナメディカル,06-7636-6300,大阪府大阪市中央区淡路町4-2-15,http://www.pasonamedical.co.jp/index.php
+株式会社 パソナライフケア,06-7636-6261,大阪府大阪市中央区淡路町4-2-15,http://www.pasona-lc.co.jp/
+株式会社 パソナロジコム,078-265-1260,兵庫県神戸市中央区御幸通8-1-6 神戸国際会館18階,http://www.pasona-logi.com/
+株式会社 パック・エックス,0120-279-106,東京都港区東新橋2-4-1 サンマリーノ汐留6階,http://www.e-pachinko.org/
+パナソニック エクセルスタッフ 株式会社,06-6945-3559,大阪府大阪市中央区城見2-1-61 TWIN21MIDタワー2階,http://excelstaff.co.jp/
+株式会社 パワーマーケティング,06-6292-0231,大阪府大阪市北区豊崎2-7-9 豊崎いずみビル7Ｆ,http://p-marketing.co.jp/
+ヒューマンアラウンド 株式会社,06-4793-0113,大阪府大阪市中央区内本町1-1-10 五苑第二ビル3Ｆ,http://www.h-around.jp/
+ヒューマンタッチ 株式会社,06-6282-6010,大阪府大阪市中央区南船場4-4-21 りそな船場ビル7F,http://human-touch.jp/career/
+株式会社 ヒューマントラスト,03-6757-3914,東京都千代田区丸の内1-6-5 丸の内北口ビルディング3階,http://www.humantrust.co.jp
+ヒューマンリソシア 株式会社,0120-54-4510,大阪府大阪市中央区南船場4-4-21 りそな船場ビル4階,http://resocia.jp/
+株式会社 フェスコム,0120-915-453,東京都千代田区神田松永町18-1 ビオレ秋葉原４階,"https://www.hoikuplus.com/, https://www.kaigoplus.com/"
+株式会社 フォーラムジャパン,06-6454-8882,大阪府大阪市北区堂島2-2-2 近鉄堂島ビル17階,http://www.forum-j.co.jp
+株式会社 フルキャスト,0120-810-315,大阪府大阪市北区曽根崎新地1-3-16 京富ビル7F,http://www.fullcast.co.jp/fullcast/
+株式会社 プロキャスト,0120-780-555,大阪府大阪市北区芝田1-27-7 大栄新館ビル6階,http://www.procast-group.com/
+株式会社 プロフィールド,0120-314-881,大阪府大阪市北区梅田1-11-4 大阪駅前第４ビル20階,http://www.profield.info/
+株式会社 ベストマッチ,06-6252-5030,大阪府大阪市中央区北久宝寺町4-4-2 本町コラボビル4階,http://www.best-match.co.jp/
+株式会社 マイスター６０,06-6458-8620,大阪府大阪市北区大淀南1-11-8 キタノビル,http://www.mystar60.co.jp/
+株式会社 マイナビ,03-3538-6210,大阪府大阪市北区大深町4-20 グランフロント大阪タワーＡ 30階,http://kango.mynavi.jp/
+Man to Man 株式会社,06-6398-0055,大阪府大阪市淀川区宮原3-5-24 新大阪第一生命ビル8F,http://www.man-to-man-g.com
+マンパワーグループ 株式会社,06-6233-0608,大阪府大阪市中央区伏見町4－2－14 WAKITA藤村御堂筋ビル9F,http://www.manpowergroup.jp/
+株式会社 都島ナース,06-6921-0590,大阪府大阪市都島区都島南通1-20-9,http://www.miyakojima-n.com
+株式会社 メイテックキャスト 大阪営業所,0120-02-8377,大阪府大阪市北区中崎西2-4-12 梅田ｾﾝﾀｰﾋﾞﾙ9F,http://www.meitec-cast.co.jp/
+株式会社 メディカル・コンシェルジュ,0800-919-1474,大阪府大阪市北区大深町4-20 グランフロント大阪 タワーA 16階,http://www.concier.com/
+株式会社 メディカル・プラネット,075-353-6668,京都府京都市下京区烏丸通高辻下る薬師前707 烏丸ｼﾃｨ・コアビル７Ｆ,http://corp.medicalplanet.co.jp/
+株式会社 メディカルリソース,06-6316-5811,大阪府大阪市北区西天満4-14-3 住友生命御堂筋ビル15Ｆ,http://www.medical-res.co.jp/
+株式会社 モード・プランニング・ジャパン,06-6341-7233,大阪府大阪市北区堂島1-6-20 堂島アバンザ4F,http://www.kirara-support.com
+有限会社 森田サービス,06-6691-2055,大阪府大阪市住吉区大領4-7-21,http://www.morita-service.com/index/html
+株式会社 ユーオーエス,0120-352-451,大阪府高槻市上牧南駅前町157-1,http://uos.co.jp/
+ライセンススクールコーポレーション 株式会社,075-342-0477,京都府京都市下京区二帖半敷町646 ダイマルヤ四条烏丸4B,http://lsc-gold.com/kyujin/area/osaka/
+ランスタッド 株式会社,06-6133-5500,大阪府大阪市北区梅田2-2-22 ハービスENTオフィスタワー18F,http://www.randstad.co.jp
+株式会社 リクルートスタッフィング,03-6274-3544,東京都中央区銀座8-4-17,http://www.r-staffing.co.jp
+株式会社 リジョブ,03-5848-7706,東京都新宿区西新宿7-15-1 アパライトビル5F,http://relax-job.com/
+リス 株式会社,0120-06-0305,大阪府大阪市中央区淡路町3-5-13 創建御堂筋ビル9階,http://shigotonavi.co.jp
+りそなビジネスサービス 株式会社,0120-23-0536,大阪府大阪市中央区備後町2-1-8 備後町野村ビル4階,http://www.resona-bs.com/
+リバティー 株式会社,06-6344-8082,大阪府大阪市北区梅田1-11-4 大阪駅前第4ビル11階,http://www.e-liberty.co.jp/
+リムリップ 株式会社,0120-811-338,愛知県名古屋市名東区本郷1-43 LiF １階,"http://www.rimrip.co.jp,http://kango-tenshoku.jp"
+レバレジーズキャリア 株式会社,0120-295-888,東京都渋谷区渋谷2-21-1 渋谷ヒカリエ17Ｆ,https://job.kiracare.jp/
+レバレジーズ 株式会社,0120-937-703,大阪府大阪市北区堂島浜1-4-19 マニュライフプレイス堂島 11F,http://leverages.jp/
+株式会社 ロマン倶楽部,0120-500-568,奈良県大和郡山市外川町75,"http://www.wellconsul.co. jp/main/RomanClub/"
+株式会社 ワールドインテック,075-354-8531,京都府京都市下京区新町通四条下る四条町347-1 京都西烏丸ビル5F,http://www.witc.co.jp/
+株式会社 ワコールキャリアサービス,075-212-2691,京都府京都市下京区四条通新町東入ル月鉾町62 住友生命京都ビル８階,http://www.e-wacs.co.jp/
+`;
+
+        let chartInstance = null;
+        let pieChartInstance = null;
+        let allCompanies = [];
+        
+        // DOM Elements
+        const searchInput = document.getElementById('search-input');
+        const prefectureFilter = document.getElementById('prefecture-filter');
+        const companyListContainer = document.getElementById('company-list');
+        const resultCount = document.getElementById('result-count');
+        const callStatusFilter = document.getElementById('call-status-filter');
+        const callResultFilter = document.getElementById('call-result-filter');
+        const totalCompaniesCountSpan = document.getElementById('total-companies-count');
+        const calledCountSpan = document.getElementById('called-count');
+        const notCalledCountSpan = document.getElementById('not-called-count');
+        const callResultSummaryList = document.getElementById('call-result-summary');
+        
+        // Modals
+        const editModalOverlay = document.getElementById('edit-modal-overlay');
+        const editForm = document.getElementById('edit-form');
+        const deleteConfirmModalOverlay = document.getElementById('delete-confirm-modal-overlay');
+        const confirmDeleteBtn = document.getElementById('confirm-delete');
+
+
+        const CALL_RESULTS = ["留守", "アプローチNG", "クロージングNG", "担当不在", "見込み", "アポOK"];
+
+        function parseCSV(data) {
+            const lines = data.trim().split('\n');
+            const headers = lines[0].split(',');
+            const rows = lines.slice(1).map((line, index) => {
+                const values = line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g) || [];
+                // Initialize company object with all properties
+                const rowData = { 
+                    id: index, 
+                    called: false, 
+                    callResult: "未入力",
+                    memo: "", // Add memo
+                    lastContactDate: null // Add lastContactDate
+                };
+                for (let i = 0; i < headers.length; i++) {
+                    let value = values[i] || '';
+                    if (value.startsWith('"') && value.endsWith('"')) {
+                        value = value.slice(1, -1);
+                    }
+                    rowData[headers[i]] = value.trim();
+                }
+                return rowData;
+            });
+            return rows;
+        }
+        
+        function getPrefectureFromAddress(address) {
+            if (!address) return '不明';
+            const match = address.match(/^(東京都|北海道|京都府|大阪府|.{2,3}県)/);
+            return match ? match[0] : 'その他';
+        }
+
+        function renderCompanyList(companies) {
+            companyListContainer.innerHTML = '';
+            if (companies.length === 0) {
+                companyListContainer.innerHTML = `<p class="text-gray-500 col-span-full text-center">該当する企業が見つかりませんでした。</p>`;
+                resultCount.textContent = '0件';
+                return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            companies.forEach(company => {
+                const card = document.createElement('div');
+                card.id = `company-card-${company.id}`;
+                card.className = `card bg-white p-5 rounded-lg shadow-sm border border-gray-200 flex flex-col fade-in ${company.called ? 'called-card' : ''}`;
+                
+                const urls = (company.HPアドレス || '').split(',').map(u => u.trim()).filter(u => u);
+                let urlLinks = urls.map(url => {
+                    let correctedUrl = url;
+                    if (!correctedUrl.startsWith('http')) {
+                        correctedUrl = 'http://' + correctedUrl;
+                    }
+                    return `<a href="${correctedUrl}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 break-all underline decoration-dotted hover:decoration-solid">${url}</a>`;
+                }).join('<br>');
+                if (!urlLinks) urlLinks = '<span class="text-gray-400">なし</span>';
+
+                const lastContactDateHtml = company.lastContactDate 
+                    ? `<p>🗓️ 最終接触日: ${company.lastContactDate}</p>` 
+                    : '';
+
+                const memoHtml = company.memo
+                    ? `<div class="mt-2">
+                           <p class="font-semibold text-gray-600">メモ:</p>
+                           <div class="memo-display">${company.memo.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+                       </div>`
+                    : '';
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input type="checkbox" data-called-id="${company.id}" class="called-checkbox h-5 w-5 text-green-600 rounded border-gray-300 focus:ring-green-500" ${company.called ? 'checked' : ''}>
+                            <span class="ml-2 text-sm font-medium text-gray-700 select-none">架電済</span>
+                        </label>
+                        <div class="flex space-x-2">
+                            <button data-company-id="${company.id}" class="edit-btn text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition">編集</button>
+                            <button data-company-id="${company.id}" class="delete-btn text-sm font-semibold text-red-600 hover:text-red-800 transition">削除</button>
+                        </div>
+                    </div>
+                    <h3 class="text-lg font-bold mb-2 text-gray-900">${company.企業名 || '名称不明'}</h3>
+                    <div class="text-sm text-gray-700 space-y-2 mt-auto">
+                        <p>📞 電話番号: ${company.電話番号 || 'N/A'}</p>
+                        <p>📍 住所: ${company.住所 || 'N/A'}</p>
+                        <p>📊 結果: ${company.callResult || '未入力'}</p>
+                        ${lastContactDateHtml}
+                        <div>
+                            🌐 HP: <br>
+                            ${urlLinks}
+                        </div>
+                        ${memoHtml}
+                    </div>
+                `;
+                fragment.appendChild(card);
+            });
+            companyListContainer.appendChild(fragment);
+            resultCount.textContent = `${companies.length}件 表示中`;
+
+            // Attach event listeners
+            document.querySelectorAll('.edit-btn').forEach(button => button.addEventListener('click', openEditModal));
+            document.querySelectorAll('.delete-btn').forEach(button => button.addEventListener('click', openDeleteConfirmModal));
+            document.querySelectorAll('.called-checkbox').forEach(checkbox => checkbox.addEventListener('change', handleCalledChange));
+        }
+
+        // --- Modal Functions ---
+        function openEditModal(event) {
+            const companyId = parseInt(event.target.dataset.companyId);
+            const companyToEdit = allCompanies.find(c => c.id === companyId);
+            if (!companyToEdit) return;
+
+            document.getElementById('editing-company-id').value = companyToEdit.id;
+            document.getElementById('edit-企業名').value = companyToEdit.企業名 || '';
+            document.getElementById('edit-電話番号').value = companyToEdit.電話番号 || '';
+            document.getElementById('edit-住所').value = companyToEdit.住所 || '';
+            document.getElementById('edit-HPアドレス').value = companyToEdit.HPアドレス || '';
+            document.getElementById('edit-架電結果').value = companyToEdit.callResult || '未入力';
+            document.getElementById('edit-最終接触日').value = companyToEdit.lastContactDate || '';
+            document.getElementById('edit-メモ').value = companyToEdit.memo || '';
+            document.getElementById('edit-modal-info').textContent = `「${companyToEdit.企業名}」の情報を編集します。`;
+            
+            editModalOverlay.classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            editModalOverlay.classList.add('hidden');
+        }
+
+        function saveEditedCompany(event) {
+            event.preventDefault();
+            const companyId = parseInt(document.getElementById('editing-company-id').value);
+            const companyIndex = allCompanies.findIndex(c => c.id === companyId);
+            if (companyIndex === -1) return;
+
+            const updatedData = {
+                企業名: document.getElementById('edit-企業名').value,
+                電話番号: document.getElementById('edit-電話番号').value,
+                住所: document.getElementById('edit-住所').value,
+                HPアドレス: document.getElementById('edit-HPアドレス').value,
+                callResult: document.getElementById('edit-架電結果').value,
+                lastContactDate: document.getElementById('edit-最終接触日').value,
+                memo: document.getElementById('edit-メモ').value,
+            };
+
+            allCompanies[companyIndex] = {
+                ...allCompanies[companyIndex],
+                ...updatedData,
+                prefecture: getPrefectureFromAddress(updatedData.住所)
+            };
+            allCompanies[companyIndex].called = (updatedData.callResult !== "未入力");
+
+            closeEditModal();
+            filterAndRender();
+        }
+
+        function openDeleteConfirmModal(event) {
+            const companyId = parseInt(event.target.dataset.companyId);
+            const companyToDelete = allCompanies.find(c => c.id === companyId);
+            if (!companyToDelete) return;
+
+            const confirmText = document.getElementById('delete-confirm-text');
+            confirmText.innerHTML = `「<span class="font-bold">${companyToDelete.企業名}</span>」を本当に削除しますか？<br>この操作は元に戻せません。`;
+            confirmDeleteBtn.dataset.companyId = companyId;
+            deleteConfirmModalOverlay.classList.remove('hidden');
+        }
+
+        function closeDeleteConfirmModal() {
+            deleteConfirmModalOverlay.classList.add('hidden');
+        }
+
+        function handleDeleteCompany() {
+            const companyId = parseInt(confirmDeleteBtn.dataset.companyId);
+            const companyIndex = allCompanies.findIndex(c => c.id === companyId);
+            
+            if (companyIndex > -1) {
+                allCompanies.splice(companyIndex, 1);
+            }
+            
+            closeDeleteConfirmModal();
+            filterAndRender();
+        }
+
+        function handleCalledChange(event) {
+            const companyId = parseInt(event.target.dataset.calledId);
+            const company = allCompanies.find(c => c.id === companyId);
+            if (company) {
+                company.called = event.target.checked;
+                if (!company.called) {
+                    company.callResult = "未入力";
+                }
+                filterAndRender();
+            }
+        }
+
+        function setupPrefectureFilter(companies) {
+            const prefectures = [...new Set(companies.map(c => c.prefecture))].sort();
+            const fragment = document.createDocumentFragment();
+            prefectures.forEach(pref => {
+                if(pref !== '不明' && pref !== 'その他') {
+                    const option = document.createElement('option');
+                    option.value = pref;
+                    option.textContent = pref;
+                    fragment.appendChild(option);
+                }
+            });
+            prefectureFilter.appendChild(fragment);
+        }
+
+        function updateChart(companies) {
+            const ctx = document.getElementById('prefecture-chart').getContext('2d');
+            const prefectureCounts = companies.reduce((acc, company) => {
+                const pref = company.prefecture;
+                acc[pref] = (acc[pref] || 0) + 1;
+                return acc;
+            }, {});
+
+            const sortedPrefectures = Object.entries(prefectureCounts).sort((a, b) => b[1] - a[1]);
+            const labels = sortedPrefectures.map(p => p[0]);
+            const data = sortedPrefectures.map(p => p[1]);
+            
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '企業数',
+                        data: data,
+                        backgroundColor: 'rgba(79, 70, 229, 0.7)',
+                        borderColor: 'rgba(79, 70, 229, 1)',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e293b',
+                            titleFont: { size: 14 },
+                            bodyFont: { size: 12 },
+                            padding: 10,
+                            cornerRadius: 6,
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            grid: { color: '#e5e7eb' },
+                            ticks: { precision: 0 }
+                        },
+                        y: {
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateCallResultPieChart(companies) {
+            const ctx = document.getElementById('call-result-pie-chart').getContext('2d');
+            const callResultCounts = {};
+            [...CALL_RESULTS, "未入力"].forEach(result => callResultCounts[result] = 0);
+
+            companies.forEach(company => {
+                const result = company.callResult || "未入力";
+                if (result in callResultCounts) {
+                    callResultCounts[result]++;
+                }
+            });
+
+            const labels = Object.keys(callResultCounts);
+            const data = Object.values(callResultCounts);
+
+            const backgroundColors = [
+                '#4f46e5', // indigo-600
+                '#10b981', // emerald-500
+                '#ef4444', // red-500
+                '#f97316', // orange-500
+                '#eab308', // yellow-500
+                '#3b82f6', // blue-500
+                '#9ca3af'  // gray-400 (for 未入力)
+            ];
+
+            if (pieChartInstance) {
+                pieChartInstance.destroy();
+            }
+
+            pieChartInstance = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: backgroundColors,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 20,
+                                padding: 15,
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: '#1e293b',
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) { label += ': '; }
+                                    if (context.parsed !== null) {
+                                        const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+                                        const value = context.parsed;
+                                        const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                        label += `${value}件 (${percentage}%)`;
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateSummaryCounts() {
+            const totalCompanies = allCompanies.length;
+            const calledCount = allCompanies.filter(company => company.called).length;
+            const notCalledCount = totalCompanies - calledCount;
+
+            totalCompaniesCountSpan.textContent = `全企業: ${totalCompanies}件`;
+            calledCountSpan.textContent = `架電済: ${calledCount}件`;
+            notCalledCountSpan.textContent = `未架電: ${notCalledCount}件`;
+
+            const callResultCounts = {};
+            [...CALL_RESULTS, "未入力"].forEach(result => callResultCounts[result] = 0);
+
+            allCompanies.forEach(company => {
+                 const result = company.callResult || "未入力";
+                if (result in callResultCounts) {
+                    callResultCounts[result]++;
+                }
+            });
+
+            callResultSummaryList.innerHTML = '';
+            const sortedResults = [...CALL_RESULTS, "未入力"].filter(r => callResultCounts[r] > 0);
+            sortedResults.forEach(result => {
+                const percentage = totalCompanies > 0 ? ((callResultCounts[result] / totalCompanies) * 100).toFixed(1) : 0;
+                const li = document.createElement('li');
+                li.textContent = `${result}: ${callResultCounts[result]}件 (${percentage}%)`;
+                callResultSummaryList.appendChild(li);
+            });
+        }
+
+        function filterAndRender() {
+            const searchTerm = searchInput.value.toLowerCase();
+            const selectedPrefecture = prefectureFilter.value;
+            const selectedCallStatus = callStatusFilter.value;
+            const selectedCallResult = callResultFilter.value;
+
+            const filteredCompanies = allCompanies.filter(company => {
+                const nameMatch = (company.企業名 || '').toLowerCase().includes(searchTerm);
+                const prefectureMatch = selectedPrefecture ? company.prefecture === selectedPrefecture : true;
+                
+                let callStatusMatch = true;
+                if (selectedCallStatus === 'called') {
+                    callStatusMatch = company.called;
+                } else if (selectedCallStatus === 'not-called') {
+                    callStatusMatch = !company.called;
+                }
+
+                let callResultMatch = true;
+                if (selectedCallResult !== 'all') {
+                    callResultMatch = (company.callResult || "未入力") === selectedCallResult;
+                }
+
+                return nameMatch && prefectureMatch && callStatusMatch && callResultMatch;
+            });
+            
+            renderCompanyList(filteredCompanies);
+            updateChart(filteredCompanies);
+            updateCallResultPieChart(filteredCompanies);
+            updateSummaryCounts(); // Update summary based on all companies
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const parsedData = parseCSV(companyData);
+            
+            allCompanies.push(...parsedData.map(c => ({
+                ...c,
+                prefecture: getPrefectureFromAddress(c.住所)
+            })));
+
+            setupPrefectureFilter(allCompanies);
+            filterAndRender(); // Initial render
+
+            // Event Listeners for controls
+            searchInput.addEventListener('input', filterAndRender);
+            prefectureFilter.addEventListener('change', filterAndRender);
+            callStatusFilter.addEventListener('change', filterAndRender);
+            callResultFilter.addEventListener('change', filterAndRender);
+
+            // Event Listeners for modals
+            document.getElementById('cancel-edit').addEventListener('click', closeEditModal);
+            editForm.addEventListener('submit', saveEditedCompany);
+            document.getElementById('cancel-delete').addEventListener('click', closeDeleteConfirmModal);
+            confirmDeleteBtn.addEventListener('click', handleDeleteCompany);
+        });
+    </script>
+</body>
+</html>
